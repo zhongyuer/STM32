@@ -29,20 +29,13 @@ extern "C" {
 #include "main.h"
 
 /* USER CODE BEGIN Includes */
-
 #include <stdio.h>
-#include <string.h>
-
 /* USER CODE END Includes */
 
 extern UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN Private defines */
-extern	char		g_uart1_rxbuf[256];
-extern	uint8_t		g_uart1_bytes;
 
-#define	clear_uart1_rxbuf()	do { memset(g_uart1_rxbuf, 0, sizeof(g_uart1_rxbuf));\
-										g_uart1_bytes=0; } while(0)
 /* USER CODE END Private defines */
 
 void MX_USART1_UART_Init(void);

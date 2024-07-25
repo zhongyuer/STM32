@@ -41,41 +41,18 @@ void MX_GPIO_Init(void);
 /* USER CODE BEGIN Prototypes */
 enum
 {
-
 	RedLed,
 	GreenLed,
 	BlueLed,
 	LedMax,
-
-};
-
-enum
-{
-
-	Relay1,
-	Relay2,
-	RelayMax,
-
 };
 
 #define OFF		0
 #define ON		1
 
-typedef	struct gpio_s
-{
-	const	char	*name;
-	GPIO_TypeDef	*group;
-	uint16_t		pin;
-
-}gpio_t;
-
-extern gpio_t	relays[RelayMax];
-extern gpio_t	leds[LedMax];
-
 extern void turn_led(int which, int status);
 
-extern void blink_led(int which, uint32_t interval);
-
+extern void blink_led(int which, int state);
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus

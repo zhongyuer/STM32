@@ -22,13 +22,16 @@
 #include "gpio.h"
 
 /* USER CODE BEGIN 0 */
-
+#include "FreeRTOS.h"
+#include "task.h"
 /* USER CODE END 0 */
 
 /*----------------------------------------------------------------------------*/
 /* Configure GPIO                                                             */
 /*----------------------------------------------------------------------------*/
 /* USER CODE BEGIN 1 */
+#define pdMS_TO_TICKS( xTimeInMs ) ( ( TickType_t ) ( ( ( TickType_t ) \
+		( xTimeInMs ) * ( TickType_t ) configTICK_RATE_HZ ) / ( TickType_t ) 1000 ) )
 
 /* USER CODE END 1 */
 
@@ -65,7 +68,7 @@ void MX_GPIO_Init(void)
 
   /*Configure GPIO pins : PBPin PBPin PBPin */
   GPIO_InitStruct.Pin = Key1_Pin|Key2_Pin|Key3_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
@@ -76,27 +79,21 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 3, 0);
-  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
-
 }
 
 /* USER CODE BEGIN 2 */
 
-
-
-gpio_t		leds[LedMax] =
+typedef struct gpio_s
 {
-	{ "RedLed", RedLed_GPIO_Port, RedLed_Pin},
-	{ "GreenLed", GreenLed_GPIO_Port, GreenLed_Pin},
-	{ "BlueLed", BlueLed_GPIO_Port, BlueLed_Pin},
-};
+	GPIO_TypeDef	*group;
+	uint16_t		pin;
+}gpio_t;
 
-gpio_t	relays[RelayMax] =
+gpio_t	leds[LedMax] =
 {
-		{ "Relay1", Key1_GPIO_Port, Key1_Pin},
-		{ "Relay2", Key2_GPIO_Port, Key2_Pin},
+	{ RedLed_GPIO_Port, RedLed_Pin},
+	{ GreenLed_GPIO_Port, GreenLed_Pin},
+	{ BlueLed_GPIO_Port, BlueLed_Pin},
 };
 
 void turn_led(int which, int status)
@@ -104,37 +101,19 @@ void turn_led(int which, int status)
 	GPIO_PinState		level;
 
 	if( which >= LedMax )
-		return;
+		return ;
+
 	level = status==OFF ? GPIO_PIN_SET : GPIO_PIN_RESET;
 
 	HAL_GPIO_WritePin(leds[which].group, leds[which].pin, level);
 }
 
-void blink_led(int which, uint32_t interval)
+void blink_led(int which, int state)
 {
-	turn_led(which, ON);
-	HAL_Delay(interval);
+	turn_led(which, state);
+	//vTaskDelay(pdMS_TO_TICKS(2000));
 
-	turn_led(which, OFF);
-	HAL_Delay(interval);
+	//turn_led(which, OFF);
+	//vTaskDelay(pdMS_TO_TICKS(2000));
 }
-
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-	if( Key1_Pin == GPIO_Pin )
-	{
-		blink_led(BlueLed, 500);
-	}
-
-	else if( Key2_Pin == GPIO_Pin )
-	{
-		blink_led(RedLed, 500);
-	}
-
-	else if( Key3_Pin == GPIO_Pin )
-	{
-		blink_led(GreenLed, 500);
-	}
-}
-
 /* USER CODE END 2 */

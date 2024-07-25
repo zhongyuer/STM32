@@ -18,20 +18,15 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "adc.h"
-#include "i2c.h"
+#include "cmsis_os.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdio.h>
-#include <string.h>
-#include "dht11.h"
-#include "sht20.h"
-#include "core_json.h"
-#include "stm32l4xx_hal.h"
+#include "FreeRTOS.h"
+#include "task.h"
+//#include "event_groups.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -41,6 +36,13 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+//#define pdMS_TO_TICKS( xTimeInMs ) ( ( TickType_t )( ( ( TickType_t )( xTimeInMs ) * ( TickType_t ) configTICK_RATE_HZ ) / ( TickType_t ) 1000 ) )
+#define KEY1_EVENT (0x01 << 0)
+#define KEY2_EVENT (0x01 << 1)
+#define KEY3_EVENT (0X01 << 2)
+
+#define KEY_ON 1
+#define KEY_OFF 0
 
 /* USER CODE END PD */
 
@@ -52,24 +54,141 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+static TaskHandle_t LED_Task_Handle = NULL;
+static TaskHandle_t KEY_Task_Handle = NULL;
+static EventGroupHandle_t Event_Handle = NULL;
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-/* USER CODE BEGIN PFP */
+void MX_FREERTOS_Init(void);
 
+/* USER CODE BEGIN PFP */
+static void AppTaskCreate(void* parameter);
+static void LED_Task(void* parameters);
+//static void Hello_Task(void *parameters);
+static void KEY_Task(void* parameters);
+uint8_t Key_Scan(GPIO_TypeDef* GPIOx, uint16_t GPIO_Pin);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+ static void AppTaskCreate(void* parameter)
+ {
+	  BaseType_t xReturn = pdPASS;
 
-static int report_tempRH_json(void);
+	  taskENTER_CRITICAL();
 
-//static int parser_led_json(char *json_string, int bytes);
+	  Event_Handle = xEventGroupCreate();
+	  if(NULL != Event_Handle)
+		  printf("Event_Handle Create Successfully\r\n");
 
-static void proc_uart1_recv(void);
+	  //printf("Free heap size before creating LED_Task: %u\n", (unsigned int)xPortGetFreeHeapSize());
+	  xReturn = xTaskCreate(LED_Task, "LED_Task", 128, NULL, 3, &LED_Task_Handle);
+	  if(pdPASS != xReturn)
+	  {
+		  printf("LED_Task Create Error\r\n");
+	  }
 
+	  //printf("Free heap size before creating KEY_Task: %u\n", (unsigned int)xPortGetFreeHeapSize());
+	  xReturn = xTaskCreate(KEY_Task, "KEY_Task", 128, NULL, 2, &KEY_Task_Handle);
+	  if(pdPASS != xReturn)
+	  {
+		  //printf("x: %ld\r\n", xReturn);
+		  printf("KET_Task Create Error\r\n");
+	  }
+
+	  vTaskDelete(NULL);
+
+	  taskEXIT_CRITICAL();
+ }
+
+  static void LED_Task(void* parameter)
+  {
+	  EventBits_t r_event;
+
+	  while(1)
+	  {
+		  r_event = xEventGroupWaitBits(Event_Handle, KEY1_EVENT|KEY2_EVENT|KEY3_EVENT, pdTRUE, pdFALSE, portMAX_DELAY);
+		  if((r_event & KEY1_EVENT) == KEY1_EVENT)
+		  {
+			  blink_led(RedLed, ON);
+			  printf("RED LED ON\r\n");
+		  }
+		  else
+		  {
+			  blink_led(RedLed, OFF);
+		  }
+
+		  if((r_event & KEY2_EVENT) == KEY2_EVENT)
+		  {
+			  blink_led(GreenLed, ON);
+			  printf("GREEN LED ON\r\n");
+		  }
+		  else
+		  {
+			  blink_led(GreenLed, OFF);
+		  }
+
+		  if((r_event & KEY3_EVENT) == KEY3_EVENT)
+		  {
+			  blink_led(BlueLed, ON);
+			  printf("BLUE LED ON\r\n");
+		  }
+		  else
+		  {
+			  blink_led(BlueLed, OFF);
+		  }
+
+	  }
+  }
+
+  static void KEY_Task(void* parameter)
+  {
+	  while(1)
+	  {
+		  if(Key_Scan(Key1_GPIO_Port, Key1_Pin) == KEY_ON)
+		  {
+			  xEventGroupSetBits(Event_Handle, KEY1_EVENT);
+			  printf("KEY1 ON\r\n");
+		  }
+
+		  if(Key_Scan(Key2_GPIO_Port, Key2_Pin) == KEY_ON)
+		  {
+			  xEventGroupSetBits(Event_Handle, KEY2_EVENT);
+			  printf("KEY2 ON\r\n");
+		  }
+
+		  if(Key_Scan(Key3_GPIO_Port, Key3_Pin) == KEY_ON)
+		  {
+			  xEventGroupSetBits(Event_Handle, KEY3_EVENT);
+			  printf("KEY3 ON\r\n");
+		  }
+	  }
+  }
+
+#if 0
+void LED_Task(void* parameters)
+{
+	while(1)
+	{
+		blink_led(RedLed);
+		blink_led(GreenLed);
+		blink_led(BlueLed);
+	}
+}
+
+void Hello_Task(void *parameters)
+{
+	while(1)
+	{
+		printf("Hello World\r\n");
+		vTaskDelay(pdMS_TO_TICKS(3000));
+	}
+
+}
+#endif
 /* USER CODE END 0 */
 
 /**
@@ -79,10 +198,6 @@ static void proc_uart1_recv(void);
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-
-  //uint32_t		lux, noisy;
-
-  float		temperature, humidity;
 
   /* USER CODE END 1 */
 
@@ -104,54 +219,38 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_USART1_UART_Init();
-  MX_ADC1_Init();
   MX_TIM6_Init();
-  MX_I2C1_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
 
+  /* Call init function for freertos objects (in freertos.c) */
+  MX_FREERTOS_Init();
+
+  /* Start scheduler */
+  //osKernelStart();
+
+  //printf("Free heap size before creating App_Task: %u\n", (unsigned int)xPortGetFreeHeapSize());
+  BaseType_t xReturn = pdPASS;
+  xReturn = xTaskCreate(AppTaskCreate, "AppTaskCreate", 128, NULL, 1, NULL);
+  if(xReturn ==pdPASS)
+  {
+	  vTaskStartScheduler();//启动调度器
+  }
+
+  //xTaskCreate(Hello_Task, "Hello_Task", 128, NULL,1, NULL);
+
+
+  /* We should never get here as control is now taken by the scheduler */
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-
-  //printf("temperature: %.3f\n", 30.33);
-
   while (1)
   {
-
-	  proc_uart1_recv();
-
-	  report_tempRH_json();
-	  HAL_Delay(3000);
-
-	  //adc_sample_lux_noisy(&lux, &noisy);
-	  //printf("Lux[%lu] Noisy[%lu]\r\n", lux, noisy);
-	  //HAL_Delay(5000);
-
-	  if(SHT20_SampleData(&temperature, &humidity) <0 )
-	  {
-		  printf("error: SHT20 Sample Data failure\r\n");
-	  }
-	  else
-	  {
-		  printf("SHT20 Sample Temperature: %.3f  Relative Humidity: %.3f\r\n", temperature, humidity);
-
-	  }
-
-	  HAL_Delay(3000);
-
-	  if( report_tempRH_json() < 0 )
-	  {
-		  printf("error: UART report temperature and relative humidity failure\r\n");
-
-	  }
-	  HAL_Delay(3000);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
-
   /* USER CODE END 3 */
 }
 
@@ -204,94 +303,41 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-
-int report_tempRH_json(void)
-  {
-  	char		buf[128];
-  	float		temperature, humidity;
-
-  	if( SHT20_SampleData(&temperature ,&humidity) < 0 )
-  	{
-  		printf("ERROR: SHT20 sample data failure\n");
-
-  		return -1;
-  	}
-
-  	memset(buf, 0, sizeof(buf));
-  	snprintf(buf, sizeof(buf), "{\"Temperature\":\"%.2f\",\"Humidity\":\"%.2f\"}",temperature, humidity);
-  	HAL_UART_Transmit(&huart1, (uint8_t *)buf, strlen(buf), 0xFFFF);
-
-  	return 0;
-
-  }
-
-int	parser_led_json(char *json_string, int bytes)
+uint8_t Key_Scan(GPIO_TypeDef* GPIOx, uint16_t GPIO_Pin)
 {
-		JSONStatus_t		result;
-		char				save;
-		char				*value;
-		size_t				valen;
-		int					i;
-
-		printf("DEBUG: start parser JSON string: %s\r\n", json_string);
-
-		result = JSON_Validate(json_string, bytes);
-
-		if(JSONPartial == result)
-		{
-			printf("WARN: JSON document is valid so far but incomlete!\r\n");
-			return 0;
-		}
-
-		if(JSONSuccess != result)
-		{
-			printf("ERROR: JSON document is not valid JSON!\r\n");
-			return -1;
-		}
-
-		for(i=0; i<LedMax; i++)
-		{
-			result = JSON_Search( json_string, bytes, leds[i].name, strlen(leds[i].name), &value, &valen);
-			if( JSONSuccess == result )
-			{
-				save = value[valen];
-				value[valen] = '\0';
-
-				if( !strncasecmp(value, "on", 2) )
-				{
-					printf("DEBUG: turn %s on\r\n", leds[i].name);
-					turn_led(i, ON);
-				}
-
-				else if( !strncasecmp(value, "off", 3) )
-				{
-					printf("DEBUG: turn %s off\r\n", leds[i].name);
-					turn_led(i, OFF);
-				}
-
-				value[valen] = save;
-			}
-		}
-	return 1;
-
+    if (HAL_GPIO_ReadPin(GPIOx, GPIO_Pin) == GPIO_PIN_RESET)
+    {
+        // 按键按下，等待按键释放
+        while (HAL_GPIO_ReadPin(GPIOx, GPIO_Pin) == GPIO_PIN_RESET);
+        return KEY_ON;
+    }
+    else
+    {
+        return KEY_OFF;
+    }
 }
-
-void proc_uart1_recv(void)
-{
-	if( g_uart1_bytes >0 )
-	{
-		HAL_Delay(200);
-		if( 0 != parser_led_json(g_uart1_rxbuf, g_uart1_bytes) )
-		{
-			clear_uart1_rxbuf();
-
-		}
-
-	}
-
-}
-
 /* USER CODE END 4 */
+
+/**
+  * @brief  Period elapsed callback in non blocking mode
+  * @note   This function is called  when TIM7 interrupt took place, inside
+  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
+  * a global variable "uwTick" used as application time base.
+  * @param  htim : TIM handle
+  * @retval None
+  */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  /* USER CODE BEGIN Callback 0 */
+
+  /* USER CODE END Callback 0 */
+  if (htim->Instance == TIM7) {
+    HAL_IncTick();
+  }
+  /* USER CODE BEGIN Callback 1 */
+
+  /* USER CODE END Callback 1 */
+}
 
 /**
   * @brief  This function is executed in case of error occurrence.
