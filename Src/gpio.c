@@ -22,16 +22,13 @@
 #include "gpio.h"
 
 /* USER CODE BEGIN 0 */
-#include "FreeRTOS.h"
-#include "task.h"
+
 /* USER CODE END 0 */
 
 /*----------------------------------------------------------------------------*/
 /* Configure GPIO                                                             */
 /*----------------------------------------------------------------------------*/
 /* USER CODE BEGIN 1 */
-#define pdMS_TO_TICKS( xTimeInMs ) ( ( TickType_t ) ( ( ( TickType_t ) \
-		( xTimeInMs ) * ( TickType_t ) configTICK_RATE_HZ ) / ( TickType_t ) 1000 ) )
 
 /* USER CODE END 1 */
 
@@ -59,6 +56,9 @@ void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, GreenLed_Pin|RedLed_Pin, GPIO_PIN_SET);
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_RESET);
+
   /*Configure GPIO pin : PtPin */
   GPIO_InitStruct.Pin = BlueLed_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -66,14 +66,8 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(BlueLed_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PBPin PBPin PBPin */
-  GPIO_InitStruct.Pin = Key1_Pin|Key2_Pin|Key3_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : PCPin PCPin */
-  GPIO_InitStruct.Pin = GreenLed_Pin|RedLed_Pin;
+  /*Configure GPIO pins : PCPin PC8 PCPin */
+  GPIO_InitStruct.Pin = GreenLed_Pin|GPIO_PIN_8|RedLed_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -82,14 +76,13 @@ void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 2 */
-
 typedef struct gpio_s
 {
 	GPIO_TypeDef	*group;
 	uint16_t		pin;
 }gpio_t;
 
-gpio_t	leds[LedMax] =
+gpio_t	leds[MaxLed] =
 {
 	{ RedLed_GPIO_Port, RedLed_Pin},
 	{ GreenLed_GPIO_Port, GreenLed_Pin},
@@ -100,20 +93,12 @@ void turn_led(int which, int status)
 {
 	GPIO_PinState		level;
 
-	if( which >= LedMax )
+	if(which >= MaxLed)
 		return ;
 
-	level = status==OFF ? GPIO_PIN_SET : GPIO_PIN_RESET;
+	level = (status==OFF) ? GPIO_PIN_SET : GPIO_PIN_RESET;
 
 	HAL_GPIO_WritePin(leds[which].group, leds[which].pin, level);
 }
 
-void blink_led(int which, int state)
-{
-	turn_led(which, state);
-	//vTaskDelay(pdMS_TO_TICKS(2000));
-
-	//turn_led(which, OFF);
-	//vTaskDelay(pdMS_TO_TICKS(2000));
-}
 /* USER CODE END 2 */
