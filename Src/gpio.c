@@ -76,29 +76,48 @@ void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 2 */
+
 typedef struct gpio_s
 {
 	GPIO_TypeDef	*group;
-	uint16_t		pin;
+	uint16_t		 pin;
+
 }gpio_t;
 
-gpio_t	leds[MaxLed] =
+gpio_t	leds[LedMax] =    //每个元素都是gpio_t结构�?
 {
-	{ RedLed_GPIO_Port, RedLed_Pin},
-	{ GreenLed_GPIO_Port, GreenLed_Pin},
-	{ BlueLed_GPIO_Port, BlueLed_Pin},
+		{ RedLed_GPIO_Port, RedLed_Pin},
+		{ GreenLed_GPIO_Port, GreenLed_Pin},
+		{ BlueLed_GPIO_Port, BlueLed_Pin},
+
 };
 
 void turn_led(int which, int status)
 {
-	GPIO_PinState		level;
+	GPIO_PinState	level;
 
-	if(which >= MaxLed)
+	if( which >= LedMax )
 		return ;
 
 	level = (status==OFF) ? GPIO_PIN_SET : GPIO_PIN_RESET;
 
 	HAL_GPIO_WritePin(leds[which].group, leds[which].pin, level);
+
 }
+
+#if 0
+void blink_led(int which, uint32_t interval)
+{
+	turn_led(which,ON);
+	HAL_Delay(interval);
+
+	turn_led(which, OFF);
+	HAL_Delay(interval);
+
+	turn_led(which, OFF);
+	HAL_Delay(interval);
+
+}
+#endif
 
 /* USER CODE END 2 */

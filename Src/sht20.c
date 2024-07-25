@@ -174,7 +174,6 @@ int SHT20_SampleData(float *temperature, float *humidity)
 	*temperature = -46.85 + 175.72*((float)temp/65536);
 	*humidity = -6 + 125 * ((float)humd / 65536);
 
-	//printf("temp humd data: %f;%f\r\n", *temperature, *humidity);
 	return 0;
 }
 

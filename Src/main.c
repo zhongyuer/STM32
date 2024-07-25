@@ -17,8 +17,8 @@
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
+#include <ring_buffer.h>
 #include "main.h"
-#include "cmsis_os.h"
 #include "can.h"
 #include "i2c.h"
 #include "tim.h"
@@ -27,52 +27,18 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "FreeRTOS.h"
-#include "task.h"
-#include "event_groups.h"
-#include "stream_buffer.h"
-#include "sht20.h"
+#include <stdio.h>
 #include <string.h>
-#include <stdint.h>
-#include <inttypes.h>
-//#include "sht20.c"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-typedef enum
-{
-	IDLE,
-	SAMPLING,
-	REPORTING,
-	STOPPED
-}SHT20_Task_State_t;
 
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define LED_ON_EVENT 		(0x01 << 0)
-#define LED_OFF_EVENT 		(0x01 << 1)
-#define SHT20_ON_EVENT 		(0X01 << 2)
-#define SHT20_OFF_EVENT 	(0x01 << 3)
-
-#define CMD_COUNT	4
-const uint64_t	CMD_LIST[CMD_COUNT] = {
-		0x1122334455667788,		//CMD_LED_ON
-		0x1022334455667788,		//CMD_LED_OFF
-		0x1020334455667788,		//CMD_SHT20_ON
-		0x1020304455667788		//CMD_SHT2-_OFF
-};
-
-
-#if 0
-#define CMD_LED_ON			0x1122334455667788
-#define CMD_LED_OFF 		0x1022334455667788
-#define CMD_SHT20_ON 		0x1020334455667788
-#define CMD_SHT20_OFF  		0x1020304455667788
-#endif
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -83,30 +49,31 @@ const uint64_t	CMD_LIST[CMD_COUNT] = {
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-static EventGroupHandle_t Event_Handle = NULL;
-static TaskHandle_t CMD_Parser_Task_Handle = NULL;
-static TaskHandle_t LED_Task_Handle = NULL;
-static TaskHandle_t SHT20_Report_Task_Handle = NULL;
-StreamBufferHandle_t CAN_Buffer_Handle;
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-void MX_FREERTOS_Init(void);
 /* USER CODE BEGIN PFP */
-static void AppTaskCreate(void* parameter);
-static void CMD_Parser_Task(void* parameter);
-static void LED_Task(void* parameter);
-static void SHT20_Report_Task(void* parameter);
 
-void FloatToByte(uint8_t *buf, size_t buf_size);
-extern int CAN_TX_Message(uint8_t *TxData, int length);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+int CAN_TX_Message(uint8_t *TxData, int length);
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan);
+int test_candata(void);
+void process_led(uint8_t led_state);
+int Upload_Data(uint8_t *buf, size_t buf_size);
+//int Report_tempRH(char *buf, size_t buf_size);
+void FloatToByte(uint8_t *buf, size_t buf_size);
+int SHT20_SampleData(float *temperature, float *humidity);
+int RingBuffer_Read(RingBuffer *cb, uint8_t *data);
+void RxData_Analyze(void);
 
+uint8_t					led_state = 0;
+uint8_t					temp_humd_state = 0;
+uint8_t					read_data[8] = {0};
 /* USER CODE END 0 */
 
 /**
@@ -117,6 +84,9 @@ int main(void)
 {
   /* USER CODE BEGIN 1 */
 
+	uint32_t		last_tick = 0;
+	uint8_t			buf[32];
+	size_t			buf_size = sizeof(buf);
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -136,36 +106,90 @@ int main(void)
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
-  MX_USART1_UART_Init();
   MX_GPIO_Init();
-  MX_CAN1_Init();
   MX_TIM6_Init();
+  MX_CAN1_Init();
+  MX_USART1_UART_Init();
   MX_I2C1_Init();
+  RingBuffer_Init(&canRxBuffer);
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
 
-  /* Init scheduler */
-  osKernelInitialize();
-  /* Call init function for freertos objects (in freertos.c) */
-  MX_FREERTOS_Init();
-
-  /* Start scheduler */
-  //osKernelStart();
-
-  BaseType_t xReturn = pdPASS;
-  xReturn = xTaskCreate(AppTaskCreate, "AppTaskCreate", 128, NULL, 1, NULL);
-  if(xReturn ==pdPASS)
-  {
-	  printf("333\r\n");
-  	  vTaskStartScheduler();//启动调度器
-  }
-
-  /* We should never get here as control is now taken by the scheduler */
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+
+  /*启动CAN并启用中断*/
+  if(HAL_CAN_Start(&hcan1) != HAL_OK)
+    {
+  	  Error_Handler();
+    }
+
+  if(HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK)
+     {
+     	Error_Handler();
+     }
+
+
+   /* USER CODE END CAN1_Init 2 */
+
   while (1)
   {
+
+	#if 0
+	  //CAN_TX_Message("hello", 5);
+	  if( test_candata() < 0)
+	  {
+		  printf("TX ERROE\r\n");
+	  }
+	  HAL_Delay(1000);
+	#endif
+
+	  /*从环形缓冲区里读取数据*/
+	  for(int i = 0; i<8; i++)
+	  {
+		  RingBuffer_Read(&canRxBuffer, &read_data[i]);
+	  }
+
+#if 0
+	  printf("main buffer: ");
+	  for (int i = 0; i < BUFFER_SIZE; i++)
+	  {
+		  printf("%02X ", canRxBuffer.buffer[i]); // 打印为十六进制格式
+	  }
+	  printf("\r\n");
+#endif
+
+	  /*解析数据*/
+	  RxData_Analyze();
+	  //printf("after ananlyzing data led_state: %d, temp_humd_state: %d\r\n", led_state, temp_humd_state);
+
+	  /*根据解析结果处理LED状态*/
+	  if(led_state != 0)
+	  {
+		if(HAL_GetTick() - last_tick >= 2000)
+		{
+			last_tick = HAL_GetTick();
+			process_led(led_state == 1 ? 1 : 0);
+		}
+	  }
+
+	  /*根据解析结果处理温湿度上报*/
+	  if( temp_humd_state ==1 ? 1 : 0 )
+	  {
+		  if(HAL_GetTick() - last_tick >= 2000)
+		  {
+			  last_tick = HAL_GetTick();
+			  Upload_Data(buf, buf_size);
+
+#if 0
+			  for(int i = 0; i < 8; i++)
+			  {
+				  printf("TX data: %u\r\n", buf[i]);
+			  }
+#endif
+		  }
+	  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -222,229 +246,95 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-static void AppTaskCreate(void* parameter)
-{
-
-	BaseType_t xReturn = pdPASS;
-
-	taskENTER_CRITICAL();
-
-	Event_Handle = xEventGroupCreate();
-	if(NULL == Event_Handle)
-	{
-		printf("Event_Handle Create Failure\r\n");
-	}
-
-	CAN_Buffer_Handle = xStreamBufferCreate(128, sizeof(uint8_t));
-	if(NULL == CAN_Buffer_Handle)
-	{
-		printf("CAN StreamBuffer Create Failure\r\n");
-	}
-
-	xReturn = xTaskCreate(CMD_Parser_Task, "CMD_Parser_Task", 256, NULL, 3, &CMD_Parser_Task_Handle);
-	if(pdPASS != xReturn)
-	{
-		printf("CMD_Parser_Task Create Error\r\n");
-	}
-
-	//printf("Free heap size before creating LED_Task: %u\n", (unsigned int)xPortGetFreeHeapSize());
-	xReturn = xTaskCreate(LED_Task, "LED_Task", 128, NULL, 2, &LED_Task_Handle);
-	if(pdPASS != xReturn)
-	{
-		printf("LED_Task Create Error\r\n");
-	}
-
-	//printf("Free heap size before creating SHT20_Task: %u\n", (unsigned int)xPortGetFreeHeapSize());
-	xReturn = xTaskCreate(SHT20_Report_Task, "SHT20_Report_Task", 256, NULL, 2, &SHT20_Report_Task_Handle);
-	if(pdPASS != xReturn)
-	{
-		printf("SHT20_Report_Task Create Error\r\n");
-	}
-
-	//printf("create task over\r\n");
-
-	vTaskDelete(NULL);
-
-	taskEXIT_CRITICAL();
-}
-
-static void CMD_Parser_Task(void* parameter)
-{
-	uint8_t		Get_Data[8];
-	size_t		xReceivedBytes;
-	uint64_t	rec_command = 0;
-
-	while(1)
-	{
-		printf("999\r\n");
-		//从流缓冲区中获取CAN消息
-		xReceivedBytes = xStreamBufferReceive(CAN_Buffer_Handle, Get_Data, sizeof(Get_Data), portMAX_DELAY);
-		if(xReceivedBytes == sizeof(Get_Data))
-		{
-			printf("Data Receive to Stream Buffer successfully.\r\n");
-			for(int i=0; i<8; ++i)
-			{
-				printf("Grt_Data: %02x\n", Get_Data[i]);
-				//将接收到的字节转换为64位整数(移位与运算)
-				rec_command = (rec_command << 8) | Get_Data[i];
-			}
-
-			//rec_command = *((uint64_t *)Get_Data);
-			//memcpy(&rec_command, Get_Data, sizeof(rec_command));
-
-			//解析命令，根据命令类型设置相应的事件位
-			for(int i = 0; i < CMD_COUNT; i++)
-			{
-				if(rec_command == CMD_LIST[i])
-				{
-					switch(i)
-					{
-						case 0:
-							xEventGroupSetBits(Event_Handle, LED_ON_EVENT);
-							printf("LED_ON_EVENT\r\n");
-							break;
-						case 1:
-							xEventGroupSetBits(Event_Handle, LED_OFF_EVENT);
-							printf("LED_OFF_EVENT\r\n");
-							break;
-						case 2:
-							xEventGroupSetBits(Event_Handle, SHT20_ON_EVENT);
-							printf("SHT2_ON_EVENT\r\n");
-							break;
-						case 3:
-							xEventGroupSetBits(Event_Handle, SHT20_OFF_EVENT);
-							printf("SHT20_OFF_EVENT\r\n");
-							break;
-						default:
-						    printf("Unknown command\r\n");
-						    break;
-					 }
-				break;
-				}
-			}
-		}
-	}
-}
-
-static void LED_Task(void* parameter)
-{
-	EventBits_t r_event;
-
-	while(1)
-	{
-		printf("888\r\n");
-		r_event = xEventGroupWaitBits(Event_Handle, LED_ON_EVENT|LED_OFF_EVENT, pdTRUE, pdFALSE, portMAX_DELAY);
-		if((r_event & LED_ON_EVENT) == LED_ON_EVENT)
-		{
-			turn_led(RedLed, ON);
-			vTaskDelay(pdMS_TO_TICKS(2000));
-			turn_led(GreenLed, ON);
-			vTaskDelay(pdMS_TO_TICKS(2000));
-			turn_led(BlueLed, ON);
-		}
-
-		if((r_event & LED_OFF_EVENT) == LED_OFF_EVENT)
-		{
-			printf("555\r\n");
-			turn_led(RedLed, OFF);
-			vTaskDelay(pdMS_TO_TICKS(2000));
-			turn_led(GreenLed, OFF);
-			vTaskDelay(pdMS_TO_TICKS(2000));
-			turn_led(BlueLed, OFF);
-		}
-	}
-}
-
-static void SHT20_Report_Task(void* parameter)
-{
-	EventBits_t 		r_event;
-	uint8_t				length = 8;
-	uint8_t				res;
-	uint8_t				buf[64];
-	size_t				buf_size = sizeof(buf);
-	SHT20_Task_State_t	task_state = IDLE;
-
-	while(1)
-	{
-
-#if 1
-		switch(task_state)
-		{
-			case IDLE:
-				r_event = xEventGroupWaitBits(Event_Handle, SHT20_ON_EVENT|SHT20_OFF_EVENT, pdTRUE, pdFALSE, portMAX_DELAY);
-				if((r_event & SHT20_ON_EVENT) == SHT20_ON_EVENT)
-				//if(xEventGroupWaitBits(Event_Handle, SHT20_ON_EVENT, pdTRUE, pdTRUE, portMAX_DELAY))
-				{
-					task_state = SAMPLING;
-				}
-				break;
-
-			case SAMPLING:
-				FloatToByte(buf, buf_size);
-				task_state = REPORTING;
-				break;
-
-			case REPORTING:
-				res=CAN_TX_Message(buf, (uint8_t)length);
-				if( res < 0 )
-				{
-					printf("CAN report error\r\n");
-				}
-
-				vTaskDelay(pdMS_TO_TICKS(3000));
-
-				r_event = (xEventGroupGetBits(Event_Handle));
-				//r_event = xEventGroupWaitBits(Event_Handle, SHT20_OFF_EVENT, pdTRUE, pdTRUE, portMAX_DELAY);
-				if((r_event & SHT20_OFF_EVENT) == SHT20_OFF_EVENT)
-				{
-					task_state = STOPPED;
-				}
-				else
-				{
-					task_state = SAMPLING;
-				}
-
-				break;
-
-			case STOPPED:
-				printf("SHT20 Report Stop\r\n");
-				task_state = IDLE;
-				break;
-
-			default:
-				break;
-		}
-#endif
 
 #if 0
-		printf("777\r\n");
-		r_event = xEventGroupWaitBits(Event_Handle, SHT20_ON_EVENT|SHT20_OFF_EVENT, pdTRUE, pdFALSE, portMAX_DELAY);
-		if((r_event & SHT20_ON_EVENT) == SHT20_ON_EVENT)
-		{
-			while(1)
-			{
-				FloatToByte(buf, buf_size);
-				res=CAN_TX_Message(buf, (uint8_t)length);
-				if( res < 0 )
-				{
-					printf("CAN report error\r\n");
-				}
-				vTaskDelay(pdMS_TO_TICKS(3000));
+uint8_t TxData[8];
+uint8_t length = 8;
+uint8_t res1;
+uint8_t count=0;
+uint8_t i=0;
 
-				//if((r_event & SHT20_OFF_EVENT) == SHT20_OFF_EVENT)
-				if (xEventGroupGetBits(Event_Handle) & SHT20_OFF_EVENT)
-				{
-					printf("SHT20 Report Stop\r\n");
-					break;
-				}
-			}
-		}
-
-#endif
+int test_candata()
+{
+	printf("send data: ");
+	for(i=0; i<8; i++)
+	{
+		TxData[i]=count+1;
+		count++;
+		printf("%d\t", TxData[i]);
 	}
+	printf("\r\n");
+	res1=CAN_TX_Message(TxData, length);
+	if( res1 < 0 )
+	{
+		printf("CAN TX error\r\n");
+		return -1;
+	}
+	//printf("999\r\n");
+    return 0;
+}
+#endif
 
+/*上报温湿度*/
+int Upload_Data(uint8_t *buf, size_t buf_size)
+{
+	uint8_t		length = 8;
+	uint8_t		res;
+
+	FloatToByte(buf, buf_size);
+
+	res=CAN_TX_Message(buf, (uint8_t)length);
+	if( res < 0 )
+	{
+		printf("CAN report error\r\n");
+		return -1;
+	}
+	return 0;
 }
 
+/*解析接收到的报文命令*/
+void RxData_Analyze(void)
+{
+
+#if 0
+	  printf("read_data: ");
+	  for (int i = 0; i < 8; i++)
+	  {
+		  printf("%02X ",read_data[i]); // 打印为十六进制格式
+	  }
+	  printf("\r\n");
+#endif
+
+	uint8_t data_led_on[] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};//打开LED灯
+	uint8_t data_led_off[] = {0x10, 0x22, 0x33, 0x44, 0x55, 0x66,0x77, 0x88};//关闭LED灯
+
+	uint8_t data_temp_humd_on[] = {0x10, 0x20, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};//打开温湿度上报
+	uint8_t data_temp_humd_off[] = {0x10, 0x20, 0x30, 0x44, 0x55, 0x66, 0x77, 0x88};//关闭温度上报
+
+	if(memcmp(read_data, data_led_on, 8) == 0)
+	{
+		led_state = 1;
+	}
+	else if(memcmp(read_data, data_led_off, 8) == 0)
+	{
+		led_state = 2;
+	}
+	else if(memcmp(read_data, data_temp_humd_on, 8) == 0)
+	{
+		temp_humd_state = 1;
+	}
+	else if(memcmp(read_data, data_temp_humd_off, 8) == 0)
+	{
+		temp_humd_state = 2;
+	}
+	else
+	{
+		led_state = 0;
+		temp_humd_state = 0;
+	}
+}
+
+/*以TLV格式上报数据*/
 void FloatToByte(uint8_t *buf, size_t buf_size)
 {
 	float	temperature;
@@ -472,28 +362,8 @@ void FloatToByte(uint8_t *buf, size_t buf_size)
 
 	printf("temperature: %.2f  humidity: %.2f\r\n", temperature, humidity);
 }
+
 /* USER CODE END 4 */
-
-/**
-  * @brief  Period elapsed callback in non blocking mode
-  * @note   This function is called  when TIM7 interrupt took place, inside
-  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
-  * a global variable "uwTick" used as application time base.
-  * @param  htim : TIM handle
-  * @retval None
-  */
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-{
-  /* USER CODE BEGIN Callback 0 */
-
-  /* USER CODE END Callback 0 */
-  if (htim->Instance == TIM7) {
-    HAL_IncTick();
-  }
-  /* USER CODE BEGIN Callback 1 */
-
-  /* USER CODE END Callback 1 */
-}
 
 /**
   * @brief  This function is executed in case of error occurrence.

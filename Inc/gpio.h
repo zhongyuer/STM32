@@ -44,14 +44,14 @@ enum
 	RedLed,
 	GreenLed,
 	BlueLed,
-	MaxLed,
+	LedMax,
 };
 
 #define OFF		0
-#define ON		1
+#define on 		1
 
 extern void turn_led(int which, int status);
-
+extern void blink_led(int which, uint32_t interval);
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus
